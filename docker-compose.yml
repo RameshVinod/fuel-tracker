@@ -1,0 +1,40 @@
+services:
+  # Database Service (PostgreSQL)
+  db:
+    image: postgres:15-alpine
+    container_name: fuel_postgres_db
+    restart: always
+    environment:
+      POSTGRES_USER: fuel_user
+      POSTGRES_PASSWORD: fuel_password
+      POSTGRES_DB: fuel_tracker_db
+    ports:
+      - "5433:5432" # මෙතන 5432 වෙනුවට 5433 කරා (Host:Container)
+    volumes:
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - fuel_network
+
+  # Web Server Service (PHP + Apache)
+  web:
+    image: php:8.2-apache
+    container_name: fuel_php_web
+    restart: always
+    ports:
+      - "8080:80"
+    volumes:
+      - ./src:/var/www/html
+    depends_on:
+      - db
+    networks:
+      - fuel_network
+    command: >
+      sh -c "apt-get update && apt-get install -y libpq-dev && docker-php-ext-install pdo pdo_pgsql && apache2-foreground"
+
+volumes:
+  postgres_data:
+
+networks:
+  fuel_network:
+    driver: bridge
