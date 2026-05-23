@@ -1,0 +1,66 @@
+name: Fuel Tracker CI Pipeline
+
+# main branch එකට code එකක් push කරපු ගමන් මේ pipeline එක auto run වෙනවා
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    services:
+      # GitHub runner එක ඇතුළේ ටෙස්ට් කරන්න Postgres සර්විස් එකක් පණ ගැන්වීම
+      postgres_db:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: fuel_user
+          POSTGRES_PASSWORD: fuel_password
+          POSTGRES_DB: fuel_tracker_db
+        ports:
+          - 5432:5432
+        # Database එක ready වෙනකන් සෞඛ්‍ය පරීක්ෂාව (Health check) කිරීම
+        options: >-
+          --health-cmd "pg_isready -U fuel_user -d fuel_tracker_db"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+    # 1. GitHub Repository එකේ තියෙන කෝඩ් ටික runner එකට ලබා ගැනීම
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    # 2. ටෙස්ට් කිරීමට පෙර Database Tables සහ Dummy Data සාදා ගැනීම
+    - name: Initialize Database Tables
+      run: |
+        docker run --net=host -v $(pwd)/init.sql:/init.sql postgres:15-alpine sh -c "PGPASSWORD=fuel_password psql -h localhost -U fuel_user -d fuel_tracker_db -f /init.sql"
+
+    # 3. PHP Environment එක සකසා ගැනීම
+    - name: Setup PHP
+      uses: shivammathur/setup-php@v2
+      with:
+        php-version: '8.2'
+        extensions: pdo, pdo_pgsql
+
+    # 4. CRITICAL TEST: අපේ PHP API එකේ Syntax දෝෂ (Syntax errors) තියෙනවද කියා බැලීම
+    - name: Check PHP Syntax Errors (Linting)
+      run: |
+        php -l src/config.php
+        php -l src/get_stations.php
+
+    # 5. INTEGRATION TEST: PHP Code එකට ඩේටාබේස් එක සමඟ සම්බන්ධ විය හැකිද කියා බැලීම
+    - name: Test Database Connection via PHP
+      run: |
+        export DB_HOST="localhost"
+        php -r "
+          try {
+              \$pdo = new PDO('pgsql:host=localhost;port=5432;dbname=fuel_tracker_db', 'fuel_user', 'fuel_password');
+              echo 'CI Test: PHP successfully connected to PostgreSQL!\n';
+          } catch (Exception \$e) {
+              echo 'CI Test Failed: ' . \$e->getMessage() . '\n';
+              exit(1);
+          }
+        "
